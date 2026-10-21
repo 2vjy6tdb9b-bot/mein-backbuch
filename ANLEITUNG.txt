@@ -1,0 +1,10 @@
+MEIN BACKBUCH – UPDATE MIT FOTOS
+
+1. Im bisherigen Backbuch zuerst unter Sicherung eine JSON-Sicherung herunterladen.
+2. Diese ZIP-Datei entpacken.
+3. Auf GitHub im Repository mein-backbuch die Datei index.html, cappuccino.jpg und manifest.webmanifest im Hauptordner ersetzen.
+4. Den kompletten Ordner bilder samt allen 18 JPG-Dateien ebenfalls in den Hauptordner des Repository hochladen, sodass z.B. bilder/mailaenderli.jpg existiert.
+5. Änderungen mit Commit changes speichern, 1–5 Minuten warten, Webseite neu laden.
+
+Die generierten Bilder zeigen symbolische, realistische Guetzli; sie sind keine Fotos der tatsächlichen Backresultate.
+Die Rezepte und Planungen werden weiterhin lokal im Browser gespeichert, nicht mit GitHub synchronisiert.
