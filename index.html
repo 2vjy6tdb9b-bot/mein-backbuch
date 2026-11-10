@@ -31,8 +31,41 @@ function addPlan(id){const r=rby(id);state.plan[id]={count:amount||r.yield_,vari
 function plan(){const ids=Object.keys(state.plan).filter(id=>rby(id));$('app').innerHTML=`<h2>Backplanung</h2><p>Hier legst du Mengen und Varianten für deine Einkaufsliste fest.</p>${ids.length?ids.map(id=>{const r=rby(id),p=state.plan[id];return `<div class="card"><div class="row between"><b>${escapeHtml(r.title)}</b><button class="alt" onclick="deletePlan('${id}')">Entfernen</button></div><div class="controls"><label>Anzahl <input type="number" min="1" value="${p.count}" onchange="editPlan('${id}','count',this.value)"></label>${r.variants?.length?`<label>Variante <select onchange="editPlan('${id}','variant',this.value)">${r.variants.map((v,i)=>`<option value="${i}" ${i===p.variant?'selected':''}>${escapeHtml(v.name)}</option>`).join('')}</select></label>`:''}</div></div>`}).join(''):'<div class="card">Noch keine Rezepte geplant. Öffne ein Rezept und wähle «Zur Backplanung hinzufügen».</div>'}<button onclick="go('shopping')">Einkaufsliste ansehen →</button>`}
 function editPlan(id,k,val){state.plan[id][k]=+val;save();plan()}
 function deletePlan(id){delete state.plan[id];save();plan()}
-function shopping(){const totals={};for(const [id,p] of Object.entries(state.plan)){const r=rby(id);if(!r)continue;for(const x of ingredients(r,p.variant)){const key=x.name.toLowerCase()+'|'+x.unit;totals[key]||={name:x.name,unit:x.unit,qty:0};totals[key].qty+=x.qty*p.count/r.yield_}}const entries=Object.entries(totals).sort((a,b)=>a[1].name.localeCompare(b[1].name,'de'));$('app').innerHTML=`<h2>Einkaufsliste</h2><p class="muted">Summen aus der Backplanung. Unterschiedliche Bezeichnungen und Einheiten bleiben getrennt.</p>${entries.length?`<div class="card">${entries.map(([k,x])=>`<label class="checkrow ${state.checked[k]?'done':''}"><input type="checkbox" ${state.checked[k]?'checked':''} onchange="state.checked[${JSON.stringify(k)}]=this.checked;save();shopping()"><span>${fmt(x.qty)} ${escapeHtml(x.unit)} ${escapeHtml(x.name)}</span></label>`).join('')}</div><button onclick="print()">Drucken</button> <button class="alt" onclick="copyShopping()">Liste kopieren</button>`:'<div class="card">Bitte zuerst Rezepte zur Backplanung hinzufügen.</div>'}`}
-function copyShopping(){const lines=[];for(const [id,p] of Object.entries(state.plan)){const r=rby(id);if(r)lines.push(r.title+': '+p.count+' '+r.unit)}navigator.clipboard?.writeText(lines.join('\n')).then(()=>alert('Planung kopiert.')).catch(()=>alert('Kopieren nicht verfügbar.'))}
+function shopNorm(name,unit){
+ const raw=String(name||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/ß/g,'ss');
+ const n=raw.replace(/\([^)]*\)/g,' ').replace(/[,;]+/g,' ').replace(/\s+/g,' ').trim();
+ const u=String(unit||'').toLowerCase().trim();
+ const eggs=/\b(eiweiss|eiweiss|eiklar|egg white)\b/.test(n)?'white':/\b(eigelb|eidotter)\b/.test(n)?'yolk':/^(ei|eier|huhnereier|ganzes ei|ganze eier)\b/.test(n)?'whole':null;
+ if(eggs && /^(stuck|stück|stk|st|)$/i.test(u))return {key:'egg:'+eggs,name:'Eier',unit:'Stück',factor:1,egg:eggs};
+ let nameOut=name.trim(),key=n;
+ if(/\bbutter\b/.test(n)&&!/\b(erdnussbutter|kakaobutter|mandelbutter|buttercreme|buttermilch)\b/.test(n)){nameOut='Butter';key='butter'}
+ else if(/\bweissmehl\b|\bweizenmehl\b/.test(n)){nameOut='Weissmehl (Weizen)';key='weissmehl'}
+ else if(/\bpuderzucker\b/.test(n)){nameOut='Puderzucker';key='puderzucker'}
+ else if(/\bvanillezucker\b/.test(n)){nameOut='Vanillezucker';key='vanillezucker'}
+ else if(/\bzucker\b/.test(n)&&!/(vanille|puder|rohr|braun|gelier|kokosbluten)/.test(n)){nameOut='Zucker';key='zucker'}
+ else if(/\bmandeln?\b/.test(n)){const form=/gemahlen|gemahlene|mahl/.test(n)?'gemahlen':/bl[aä]tt|gehobelt/.test(n)?'Blättchen':/ganz/.test(n)?'ganz':'unspezifiziert';nameOut='Mandeln'+(form==='unspezifiziert'?'':', '+form);key='mandeln:'+form}
+ const weight={g:1,gramm:1,kg:1000,mg:0.001};const volume={ml:1,l:1000,dl:100,cl:10};
+ const factor=weight[u]??volume[u]??1;const target=weight[u]!==undefined?'g':volume[u]!==undefined?'ml':unit;
+ return {key:key+'|'+String(target).toLowerCase(),name:nameOut,unit:target,factor};
+}
+function shoppingRows(){
+ const totals={},egg={whole:0,yolk:0,white:0};
+ for(const [id,p] of Object.entries(state.plan)){const r=rby(id);if(!r)continue;
+  for(const x of ingredients(r,p.variant)){
+   const norm=shopNorm(x.name,x.unit),qty=Number(x.qty)*Number(p.count)/Number(r.yield_);
+   if(!Number.isFinite(qty))continue;
+   if(norm.egg){egg[norm.egg]+=qty;continue}
+   const k=norm.key;totals[k]??={key:k,name:norm.name,unit:norm.unit,qty:0};totals[k].qty+=qty*norm.factor;
+  }
+ }
+ const whole=Math.ceil(egg.whole-1e-8),yolk=Math.ceil(egg.yolk-1e-8),white=Math.ceil(egg.white-1e-8);
+ const separate=Math.max(yolk,white),buy=whole+separate;
+ if(buy)totals['egg:buy']={key:'egg:buy',name:'Eier',unit:'Stück',qty:buy,note:(yolk||white)?`(${whole} ganze Eier, ${yolk} Eigelb, ${white} Eiweiss; ${Math.max(0,separate-yolk)} Eigelb und ${Math.max(0,separate-white)} Eiweiss bleiben übrig)`:''};
+ return Object.values(totals).sort((a,b)=>a.name.localeCompare(b.name,'de'));
+}
+function shopping(){const entries=shoppingRows();$('app').innerHTML=`<h2>Einkaufsliste</h2><p class="muted">Gleiche Grundzutaten und kompatible Einheiten werden zusammengezählt. Butter bleibt Butter – unabhängig von weich, kalt oder flüssig. Ganze Eier, Eigelb und Eiweiss werden gemeinsam berechnet. Nicht eindeutig gleiche Zutaten bleiben getrennt.</p>${entries.length?`<div class="card">${entries.map(x=>`<label class="checkrow ${state.checked[x.key]?'done':''}"><input type="checkbox" ${state.checked[x.key]?'checked':''} onchange="state.checked[${JSON.stringify(x.key)}]=this.checked;save();shopping()"><span>${fmt(x.qty)} ${escapeHtml(x.unit)} ${escapeHtml(x.name)} ${x.note?`<small class="muted">${escapeHtml(x.note)}</small>`:''}</span></label>`).join('')}</div><button onclick="print()">Drucken</button> <button class="alt" onclick="copyShopping()">Liste kopieren</button>`:'<div class="card">Bitte zuerst Rezepte zur Backplanung hinzufügen.</div>'}`}
+function copyShopping(){const lines=shoppingRows().map(x=>`${fmt(x.qty)} ${x.unit} ${x.name}${x.note?' '+x.note:''}`);navigator.clipboard?.writeText(lines.join('\n')).then(()=>alert('Einkaufsliste kopiert.')).catch(()=>alert('Kopieren nicht verfügbar.'))}
+
 function startBake(){stepIndex=0;renderBake()}
 function renderBake(){clearTimer();const r=rby(selected),s=r.steps[stepIndex];$('app').innerHTML=`<button class="alt" onclick="renderRecipe()">← Rezept</button><div class="card" style="margin-top:18px"><p class="muted">${escapeHtml(r.title)} · Schritt ${stepIndex+1} von ${r.steps.length}</p><h2>${escapeHtml(s.title)}</h2><p style="font-size:21px;line-height:1.65">${escapeHtml(s.text)}</p>${s.timer?`<p>⏱ <span id="clock">${timeFmt(s.timer)}</span></p><button onclick="startTimer(${s.timer})">Timer starten</button> <button class="alt" onclick="clearTimer()">Stoppen</button><p class="muted">Für lange Kühlzeiten zusätzlich einen Gerätewecker verwenden.</p>`:''}</div><div class="row between"><button class="alt" onclick="moveStep(-1)" ${stepIndex===0?'disabled':''}>← Zurück</button><button onclick="moveStep(1)">${stepIndex===r.steps.length-1?'Fertig':'Weiter →'}</button></div>`}
 function moveStep(n){const r=rby(selected);if(n>0&&stepIndex===r.steps.length-1){renderRecipe();return}stepIndex=Math.max(0,stepIndex+n);renderBake()}
